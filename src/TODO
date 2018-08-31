@@ -1,24 +1,14 @@
 ---------------------------------------------------------------------------------------------
 TODO
 
-too much cargo and flying, stop flying when somehow over weight
-
-cargo weight calculation
-
-rename "ship part" to part
-
-limit ship inventory by weight
-
-optimize rendering of parts and ship
-
-do more damage to bigger ships
-
 move out splittable number from GUI, make it like this: 
 rightclick -> number input comes up(already active) -> input number -> press ENTER -> item is split into same inventory
 
-larger world
+scrolling world
 
+optimize rendering of parts and ship
 
+figure out cargo size as related to item weights
 
 ---------------------------------------------------------------------------------------------
 BUGS AND ISSUES
@@ -31,12 +21,16 @@ dragging and splitting shouldn't intersect, disable one while doing the other
 ---------------------------------------------------------------------------------------------
 DONE
 
-remove unused clear_stray_fragments_2()
-mining animation
-remote planet inventory viewing
-message system
-add various error and notification messages
-add inventory size limit
-add checking for full inventories
-change dragging system from a separate state to a flag
-keep items in old locations until they are moved succesfully
+rename "ship part" to part
+cargo weight calculation
+limit ship inventory by weight
+fix dropping items in ship edit area, position was set incorrectly and item wasn't removed from inventories
+make the dragging do nothing if item location doesn't change
+add ship size variable
+make cargo size scale with ship size
+make flight damage scale with ship size
+cargo size and flying, prohibit flying when somehow over weight
+only use item position for ship edit position, determine inventory position while drawing
+remove empty spaces in inventory after moving items
+trash area for deleting items
+add slots to inventory background
