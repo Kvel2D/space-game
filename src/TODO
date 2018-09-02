@@ -1,14 +1,26 @@
 ---------------------------------------------------------------------------------------------
 TODO
 
-move out splittable number from GUI, make it like this: 
-rightclick -> number input comes up(already active) -> input number -> press ENTER -> item is split into same inventory
 
-scrolling world
+planet name generator
 
 optimize rendering of parts and ship
+	create image for each part
+	recycle images, when part is attached, push to array and maybe reuse
+
+keep an image for ship
+	add to image when attaching parts
+	draw pixel by pixel during flying
+	remove at the end of flying
+
+no planet inventory without a station
+
+planets have levels, higher level planets produce more resources(can be seen in tooltip, next to remote inventory)
+	3 station levels, planet level must be at least equal to station level to install
 
 figure out cargo size as related to item weights
+
+
 
 ---------------------------------------------------------------------------------------------
 BUGS AND ISSUES
@@ -21,16 +33,8 @@ dragging and splitting shouldn't intersect, disable one while doing the other
 ---------------------------------------------------------------------------------------------
 DONE
 
-rename "ship part" to part
-cargo weight calculation
-limit ship inventory by weight
-fix dropping items in ship edit area, position was set incorrectly and item wasn't removed from inventories
-make the dragging do nothing if item location doesn't change
-add ship size variable
-make cargo size scale with ship size
-make flight damage scale with ship size
-cargo size and flying, prohibit flying when somehow over weight
-only use item position for ship edit position, determine inventory position while drawing
-remove empty spaces in inventory after moving items
-trash area for deleting items
-add slots to inventory background
+planets viewport and culling
+planet position generation
+cull planet interactions for planets behind ui
+flying damage scales based on flying time, happens in bursts
+flying time scales based on distance between planets

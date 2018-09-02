@@ -106,6 +106,8 @@ class Planet {
 
 	var inventory = new Vector<Dynamic>(Main.planet_inventory_size);
 
+	var image_ready = false;
+
 	function new() {
 
 	}
@@ -120,16 +122,6 @@ class Main {
 
 	var state = GameState_Planets;
 
-	static inline var ship_edit_x = 700;
-	static inline var ship_edit_y = 0;
-	static inline var ship_pixel_size = 10;
-	static inline var ship_width = 25;
-	static inline var ship_height = 20;
-	static inline var ship_edit_width = ship_width * ship_pixel_size;
-	static inline var ship_edit_height = ship_height * ship_pixel_size;
-	var ship_pixels = Data.bool_2d_vector(ship_width, ship_height);
-	var ship_color = Col.DARKGREEN;
-
 	static inline var part_width = 5;
 	static inline var part_height = 5;
 	static inline var item_width = 50;
@@ -140,11 +132,13 @@ class Main {
 	var materials = new Array<Material>();
 
 	static inline var planet_size = 64;
+	static inline var planet_scale = 2;
 
 	static inline var star_particle_amount = 15;
 	var flying_state_timer = 0;
-	var flying_state_timer_max = 1 * 60;
-	var flying_destruction_time = 0.5;
+	var flying_state_timer_max = 1.2 * 60; // varies, set before flying to planet based on distance to planet
+	var destruction_timer = 0;
+	static inline var destruction_timer_max = 1 * 60;
 	var flying_ship_x = 500;
 	var flying_ship_y = 300;
 	var star_particles = new Array<Star_Particle>();
@@ -161,13 +155,26 @@ class Main {
 
 	var previous_planet: Planet;
 	var current_planet: Planet;
+	static inline var distance_to_time = 1.0 / 250; // means that distance of 250 will take 1 second to travel
 
 	var planet_view_ship_y = 0;
 	var planet_view_ship_dy = 1;
 	var planet_view_ship_y_move_timer = 0;
 	var planet_view_ship_y_move_timer_max = 7;
 
-	static inline var ship_inventory_x = 700;
+	static inline var ui_x = 700;
+
+	static inline var ship_edit_x = ui_x;
+	static inline var ship_edit_y = 0;
+	static inline var ship_pixel_size = 10;
+	static inline var ship_width = 25;
+	static inline var ship_height = 20;
+	static inline var ship_edit_width = ship_width * ship_pixel_size;
+	static inline var ship_edit_height = ship_height * ship_pixel_size;
+	var ship_pixels = Data.bool_2d_vector(ship_width, ship_height);
+	var ship_color = Col.DARKGREEN;
+
+	static inline var ship_inventory_x = ui_x;
 	static inline var ship_inventory_y = 250;
 	static inline var ship_inventory_background_width = 250;
 	static inline var ship_inventory_background_height = 100;
@@ -175,19 +182,19 @@ class Main {
 	static inline var ship_inventory_width = 5;
 	var ship_inventory = new Vector<Dynamic>(ship_inventory_size);
 
-	static inline var planet_inventory_x = 700;
+	static inline var planet_inventory_x = ui_x;
 	static inline var planet_inventory_y = 500;
 	static inline var planet_inventory_background_width = 250;
 	static inline var planet_inventory_background_height = 100;
 	static inline var planet_inventory_size = 10;
 	static inline var planet_inventory_width = 5;
 
-	var trash_x = 700;
+	var trash_x = ui_x;
 	var trash_y = 650;
 	var trash_background_width = 100;
 	var trash_background_height = 50;
 
-	var crafting_x = 700;
+	var crafting_x = ui_x;
 	var crafting_y = 750;
 	var crafting_background_width = 300;
 	var crafting_background_height = 200;
@@ -211,27 +218,41 @@ class Main {
 	var ship_size: Int = 0;
 	var cargo_weight_max: Int = 0;
 
+	var viewport_x = 0;
+	var viewport_y = 0;
+	static inline var viewport_width = screen_width;
+	static inline var viewport_height = screen_height;
+	static inline var viewport_scroll_speed = 7;
+
+	static inline var planet_cell_size = 250;
+	static inline var planet_map_size = 50;
+	static inline var planet_map_scale = 2;
+
 	function new() {
 		Gfx.resize_screen(screen_width, screen_height, 1);
 		Gfx.load_image("mining");		
 		Gfx.load_image("assembly");		
-		Gfx.load_image("material");		
+		Gfx.load_image("material");	
 
 
 		load_string_to_pixels(ship_pixels, 
 			[
-			'...............',
-			'...............',
-			'.......#.......',
-			'....######.....',
-			'.############..',
-			'..###########..',
-			'.....#####.....',
-			'.###########...',
-			'..###########..',
-			'...............',]);
+			'....................',
+			'....................',
+			'....................',
+			'....................',
+			'....................',
+			'....................',
+			'............#.......',
+			'.........######.....',
+			'......############..',
+			'.......###########..',
+			'..........#####.....',
+			'......###########...',
+			'.......###########..',
+			'....................',]);
 
-		for (i in 0...10) {
+		function make_planet(): Planet {
 			var planet = new Planet();
 			planets.push(planet);
 			planet.x = -100;
@@ -239,82 +260,61 @@ class Main {
 			planet.name = 'planet_${planets.length - 1}';
 			planet.type = Random.int(1, 3); // 1 = no water, 2 = some water, 3 = lots of water
 			Gfx.create_image(planet.name, planet_size, planet_size);
-			generate_planet_image(planet);
+			// generate_planet_image(planet);
+
+			return planet;
 		}
 
-		planets[0].x = 50;
-		planets[0].y = 50;
+		var edge_planets = new Array<Planet>();
+		var new_edge_planets = new Array<Planet>();
+		var edge_planet_angles = new Array<Planet>();
 
-		var angle = -20;
-		for (i in 1...4) {
-			var origin = planets[0];
-			var planet = planets[i];
-			var distance = Random.int(250, 350);
-			angle += Random.int(30, 40);
-			var position: Vector2 = {
-				x: origin.x + distance, 
-				y: origin.y
-			};
-			Math.rotate_vector(position, origin.x, origin.y, angle);
-			planet.x = Std.int(position.x);
-			planet.y = Std.int(position.y);
+
+		var planet_map = run_game_of_life(planet_map_size, planet_map_size, 0.5, death_limit, birth_limit, 1);
+		Gfx.create_image("planet map", planet_map_size * planet_map_scale, planet_map_size * planet_map_scale);
+		Gfx.draw_to_image("planet map");
+		for (x in 0... planet_map.length) {
+			for (y in 0...planet_map[0].length) {
+				if (!planet_map[x][y]) {
+					Gfx.fill_box(x * planet_map_scale, y * planet_map_scale, planet_map_scale * 0.5, planet_map_scale * 0.5, Col.WHITE);
+				}
+			}
 		}
+		Gfx.draw_to_screen();
 
-		angle = -20;
-
-		for (i in 4...7) {
-			var origin = planets[2];
-			var planet = planets[i];
-			var distance = Random.int(250, 350);
-			angle += Random.int(30, 40);
-			var position: Vector2 = {
-				x: origin.x + distance, 
-				y: origin.y
-			};
-			Math.rotate_vector(position, origin.x, origin.y, angle);
-			planet.x = Std.int(position.x);
-			planet.y = Std.int(position.y);
+		for (x in 0...planet_map_size) {
+			for (y in 0...planet_map_size) {
+				if (!planet_map[x][y]) {
+					var planet = make_planet();
+					if (current_planet == null) {
+						current_planet = planet;
+					}
+					planet.x = x * planet_cell_size + Random.int(-75, 75);
+					planet.y = y * planet_cell_size + Random.int(-75, 75);
+				}
+			}
 		}
-
-
-		angle = -20;
-
-		for (i in 7...10) {
-			var origin = planets[6];
-			var planet = planets[i];
-			var distance = Random.int(250, 350);
-			angle += Random.int(30, 40);
-			var position: Vector2 = {
-				x: origin.x + distance, 
-				y: origin.y
-			};
-			Math.rotate_vector(position, origin.x, origin.y, angle);
-			planet.x = Std.int(position.x);
-			planet.y = Std.int(position.y);
-		}
-
-		current_planet = planets[0];
-
-
+		viewport_x = current_planet.x - 200;
+		viewport_y = current_planet.y - 300;
 
 
 		var m_station = new Station();
 		stations.push(m_station);
 		items.push(m_station);
 		m_station.station_type = StationType_Mining;
-		add_to_ship_inventory(m_station);
+		add_to_planet_inventory(m_station);
 
 		var a_station = new Station();
 		stations.push(a_station);
 		items.push(a_station);
 		a_station.station_type = StationType_Assembly;
-		add_to_ship_inventory(a_station);
+		add_to_planet_inventory(a_station);
 
 		var material = new Material();
 		materials.push(material);
 		items.push(material);
 		material.amount = 123;
-		add_to_ship_inventory(material);
+		add_to_planet_inventory(material);
 
 
 		update_ship_size_and_cargo_size();
@@ -339,24 +339,28 @@ class Main {
 
 	function count_neighbours(map: Vector<Vector<Bool>>, x: Int, y: Int): Int {
 		var count = 0;
+		var neighbour_x: Int;
+		var neighbour_y: Int;
+
 		for (dx in -1...2) {
 			for (dy in -1...2) {
-				var neighbour_x = x + dx;
-				var neighbour_y = y + dy;
+				if (dx != 0 || dy != 0) {
+					neighbour_x = x + dx;
+					neighbour_y = y + dy;
 
-				function out_of_bound_planet(x, y) {
-					return 0 > x || x >= map.length || 0 > y || y >= map[0].length;
-				}
+					function out_of_bound(x, y) {
+						return 0 > x || x >= map.length || 0 > y || y >= map[0].length;
+					}
 
-				if (dx == 0 && dy == 0) {
-					continue;
-				} else if (out_of_bound_planet(neighbour_x, neighbour_y)){
-					count++;
-				} else if (map[neighbour_x][neighbour_y]) {
-					count++;
+					if (dx == 0 && dy == 0) {
+						continue;
+					} else if (out_of_bound(neighbour_x, neighbour_y) || map[neighbour_x][neighbour_y]){
+						count++;
+					}
 				}
 			}
 		}
+
 		return count;
 	}
 
@@ -416,7 +420,6 @@ class Main {
 	Col.BROWN, Col.DARKBLUE, Col.BLUE];
 
 	function generate_planet_image(planet: Planet) {
-		var scale = 2;
 
 		// Pick water and land colors, don't pick same
 		var water_color = water_colors[Random.int(0, water_colors.length - 1)];
@@ -424,15 +427,18 @@ class Main {
 		var land_color = land_colors[Random.int(0, land_colors.length - 1)];
 		land_colors.push(water_color);
 
-		var swap_water_land = false;
-
 		switch (planet.type) {
 			case 1: {
 				// waterless planets have darker land color instead of water
 				// and water and land in game of life are swapped so that the
 				// cells represent the land and space is darker patches
 				initial_chance = Random.float(0.45, 0.53);
-				swap_water_land = true;
+				var temp = water_color;
+
+				// swap water and land
+				water_color = land_color;
+				land_color = temp;
+
 				water_color = Col.rgb(
 					Math.round(Col.r(land_color) * 0.85), 
 					Math.round(Col.g(land_color) * 0.85), 
@@ -448,44 +454,30 @@ class Main {
 			}
 		}
 
-		var pixels = Data.int_2d_vector(Std.int(planet_size / scale), 
-			Std.int(planet_size / scale));
-
 		// Water is generated using the game of life, water = cells in the game
-		var water_map = run_game_of_life(Std.int(planet_size / scale), 
-			Std.int(planet_size / scale), 
+		var water_map = run_game_of_life(Std.int(planet_size / planet_scale), 
+			Std.int(planet_size / planet_scale), 
 			initial_chance, death_limit, birth_limit, iterations);
-
-		for (x in 0...pixels.length) {
-			for (y in 0...pixels[0].length) {
-				if (swap_water_land) {
-					if (!water_map[x][y]) {
-						pixels[x][y] = water_color;
-					} else {
-						pixels[x][y] = land_color;
-					}
-				} else {
-					if (water_map[x][y]) {
-						pixels[x][y] = water_color;
-					} else {
-						pixels[x][y] = land_color;
-					}
-				}
-			}
-		}
 
 		Gfx.draw_to_image(planet.name);
 		Gfx.clear_screen_transparent();
 		// Draw planet texture in circle area
-		var circle_map = Math.fill_circle_map(Std.int(planet_size / scale / 2));
-		for (x in 0...pixels.length) {
-			for (y in 0...pixels[0].length) {
+		var circle_map = Math.fill_circle_map(Std.int(planet_size / planet_scale / 2));
+		for (x in 0...water_map.length) {
+			for (y in 0...water_map[0].length) {
 				if (circle_map[x][y]) {
-					Gfx.fill_box(x * scale, y * scale, scale, scale, pixels[x][y]);
+					if (water_map[x][y]) {
+						Gfx.fill_box(x * planet_scale, y * planet_scale, planet_scale, planet_scale, water_color);
+					} else {
+						Gfx.fill_box(x * planet_scale, y * planet_scale, planet_scale, planet_scale, land_color);
+					}
 				}
 			}
 		}
 		Gfx.draw_to_screen();
+
+
+		planet.image_ready = true;
 	}
 
 	function generate_part_pixels(part: Part) {
@@ -748,7 +740,7 @@ class Main {
 		Gfx.fill_box(20, planet_size / 2 - 2, (screen_width - 40), 
 			4, Col.WHITE);
 		Gfx.fill_box(20, planet_size / 2 - 2, 
-			(flying_state_timer / flying_state_timer_max) * (screen_width - 40), 
+			(1 - flying_state_timer / flying_state_timer_max) * (screen_width - 40), 
 			4, Col.BLACK);
 
 		if (current_planet != null) {
@@ -777,21 +769,30 @@ class Main {
 		}
 
 
-		flying_state_timer--;
-		
-		if (flying_state_timer / flying_state_timer_max < flying_destruction_time 
-			&& !started_destroyed_graphic) 
-		{
-			started_destroyed_graphic = true;
+		// at max, remove previous destruction, create new one, reset position
+		destruction_timer++;
+		if (destruction_timer > destruction_timer_max) {
+			destruction_timer = 0;
+			// Clear previous destruction
+			for (x in 0...destroyed_pixels.length) {
+				for (y in 0...destroyed_pixels[0].length) {
+					destroyed_pixels[x][y] = false;
+				}
+			}
+			// Generate new one
 			generate_damage();
 			destroyed_graphic_dy = Random.pick_int(-1, 1);
-		}
-		if (started_destroyed_graphic) {
-			destroyed_graphic_x += Random.int(3, 5);
-			destroyed_graphic_y += destroyed_graphic_dy * Random.int(0, 1);
+			destroyed_graphic_x = 0;
+			destroyed_graphic_y = 0;
 		}
 
-		if (flying_state_timer <= 0) {
+		// Move destroyed graphic
+		destroyed_graphic_x += Random.int(3, 5);
+		destroyed_graphic_y += destroyed_graphic_dy * Random.int(0, 1);
+
+		flying_state_timer++;
+
+		if (flying_state_timer > flying_state_timer_max) {
 			state = GameState_Planets;
 			started_destroyed_graphic = false;
 			for (x in 0...destroyed_pixels.length) {
@@ -866,68 +867,82 @@ class Main {
 		return false;
 	}
 
+	function planet_in_viewport(planet: Planet): Bool {
+		return Math.box_box_intersect(planet.x, planet.y, planet_size, planet_size, 
+			viewport_x, viewport_y, viewport_width, viewport_height);
+	}
+
+	// Interact zone ends at the ui line
+	function planet_in_interact(planet: Planet): Bool {
+		return Math.box_box_intersect(planet.x, planet.y, planet_size, planet_size, 
+			viewport_x, viewport_y, ui_x, viewport_height);
+	}
+
 	function render_planets() {
 		Gfx.clear_screen(Col.BLACK);
 
 		for (planet in planets) {
-			if (mouse_planet_intersect(planet)) {
+			if (mouse_planet_intersect(planet) && planet_in_interact(planet)) {
 				Gfx.line_thickness = 4;
-				Gfx.draw_line(current_planet.x + planet_size / 2, 
-					current_planet.y + planet_size / 2, 
-					planet.x + planet_size / 2, planet.y + planet_size / 2, 
+				Gfx.draw_line(
+					(current_planet.x - viewport_x) + planet_size / 2, 
+					(current_planet.y - viewport_y) + planet_size / 2, 
+					(planet.x - viewport_x) + planet_size / 2, 
+					(planet.y - viewport_y) + planet_size / 2, 
 					Col.YELLOW);
 				Gfx.line_thickness = 1;
 				break;
 			}
 		}
 
+
+		// TODO: optimize by putting it all in the same loop? less intersect calls
+
+		var generated_planet_this_frame = false;
+
 		// Planets
 		for (planet in planets) {
-			Gfx.draw_image(planet.x, planet.y, planet.name);
+			if (planet_in_viewport(planet)) { 
+				// generate one planet per frame, space it out
+				if (!generated_planet_this_frame && !planet.image_ready) {
+					generate_planet_image(planet);
+					generated_planet_this_frame = true;
+				}
+
+				if (!planet.image_ready) {
+					if (!generated_planet_this_frame) {
+						generate_planet_image(planet);
+						generated_planet_this_frame = true;
+					}
+					Gfx.fill_circle(planet.x - viewport_x, planet.y - viewport_y, planet_size / 2, Col.GRAY);
+				} else {
+					Gfx.draw_image(planet.x - viewport_x, planet.y - viewport_y, planet.name);
+				}
+			}
 		}
+
 
 		// Planet stations
 		for (planet in planets) {
-			switch (planet.station) {
-				case StationType_None:
-				case StationType_Assembly: Text.display(planet.x, planet.y - 5, 'A', Col.WHITE);
-				case StationType_Mining: Text.display(planet.x, planet.y - 5, 'M', Col.WHITE);
-			}			
+			if (planet_in_viewport(planet)) {
+				switch (planet.station) {
+					case StationType_None:
+					case StationType_Assembly: Text.display(planet.x, planet.y - 5, 'A', Col.WHITE);
+					case StationType_Mining: Text.display(planet.x, planet.y - 5, 'M', Col.WHITE);
+				}			
+			}
 		}
 
 		// Planet mining graphic
 		for (planet in planets) {
-			if (planet.mining_graphic_on) {
-				var graphic_progress = planet.mining_graphic_timer / Planet.mining_graphic_timer_max;
-				var c = Math.round((1 - graphic_progress) * 255);
-				Text.display(planet.x + planet_size / 2, planet.y - graphic_progress * 10, 
-					'+1', Col.rgb(c, c, c));
-			}
-		}
-
-		// Planet inventory viewing remotely
-		for (planet in planets) {
-			if (planet != current_planet && mouse_planet_intersect(planet)) {
-				var draw_x = planet.x;
-				var draw_y = planet.y + planet_size + 10;
-				Gfx.fill_box(draw_x, draw_y, planet_inventory_background_width, 
-					planet_inventory_background_height, Col.GRAY);
-				var planet_inventory = planet.inventory;
-				var dx = draw_x - planet_inventory_x;
-				var dy = draw_y - planet_inventory_y;
-				for (i in 0...planet_inventory.length) {
-					if (planet_inventory[i] != null) {
-						planet_inventory[i].x += dx;
-						planet_inventory[i].y += dy;
-						draw_item(planet_inventory[i]);
-						planet_inventory[i].x -= dx;
-						planet_inventory[i].y -= dy;
-					}
-
-					// TODO: could optimize this by keeping track of x and y variables
-					var position = position_in_planet_inventory(i);
-					// Border
-					Gfx.draw_box(position.x + dx, position.y + dy, item_width, item_height, Col.ORANGE);
+			if (planet.mining_graphic_on && planet_in_viewport(planet)) {
+				if (Math.box_box_intersect(planet.x, planet.y, planet_size, planet_size, 
+					0, 0, viewport_width, viewport_height)) 
+				{
+					var graphic_progress = planet.mining_graphic_timer / Planet.mining_graphic_timer_max;
+					var c = Math.round((1 - graphic_progress) * 255);
+					Text.display(planet.x + planet_size / 2, planet.y - graphic_progress * 10, 
+						'+1', Col.rgb(c, c, c));
 				}
 			}
 		}
@@ -944,8 +959,8 @@ class Main {
 		}
 
 		// Ship near planet
-		var ship_x = current_planet.x + planet_size * 1.5;
-		var ship_y = current_planet.y + planet_size / 2;
+		var ship_x = current_planet.x - viewport_x + planet_size * 1.5;
+		var ship_y = current_planet.y - viewport_y + planet_size / 2;
 		for (x in 0...ship_width) {
 			for (y in 0...ship_height) {
 				if (ship_pixels[x][y]) {
@@ -1178,6 +1193,36 @@ class Main {
 			});
 		}
 
+		// Remove planet inventory
+		for (planet in planets) {
+			if (planet != current_planet 
+				&& mouse_planet_intersect(planet)
+				&& planet_in_interact(planet))
+			{
+				var draw_x = planet.x - viewport_x;
+				var draw_y = planet.y - viewport_y + planet_size + 10;
+				Gfx.fill_box(draw_x, draw_y, planet_inventory_background_width, 
+					planet_inventory_background_height, Col.GRAY);
+				var planet_inventory = planet.inventory;
+				var dx = draw_x - planet_inventory_x;
+				var dy = draw_y - planet_inventory_y;
+				for (i in 0...planet_inventory.length) {
+					if (planet_inventory[i] != null) {
+						planet_inventory[i].x += dx;
+						planet_inventory[i].y += dy;
+						draw_item(planet_inventory[i]);
+						planet_inventory[i].x -= dx;
+						planet_inventory[i].y -= dy;
+					}
+
+					// TODO: could optimize this by keeping track of x and y variables
+					var position = position_in_planet_inventory(i);
+					// Border
+					Gfx.draw_box(position.x + dx, position.y + dy, item_width, item_height, Col.ORANGE);
+				}
+			}
+		}
+
 
 		// Splitting
 		if (split_material != null) {
@@ -1188,10 +1233,14 @@ class Main {
 			GUI.editable_number(split_material.x + item_width, split_material.y + item_height,
 				'', function(x) { split_amount = x; }, split_amount);
 		}
+
+		Gfx.draw_image(0, 0, "planet map");
+		Gfx.fill_box(viewport_x / planet_cell_size * planet_map_scale, viewport_y / planet_cell_size * planet_map_scale, 4, 4, Col.YELLOW);
 	}
 
 	function mouse_planet_intersect(planet: Planet): Bool {
-		return Math.dst(Mouse.x, Mouse.y, planet.x, planet.y) <= planet_size;
+		return Math.dst(Mouse.x, Mouse.y, planet.x - viewport_x + planet_size / 2, 
+			planet.y - viewport_y + planet_size / 2) <= planet_size / 2;
 	}
 
 	function position_in_ship_inventory(i: Int): IntVector2 {
@@ -1284,9 +1333,13 @@ class Main {
 
 	function update_planets() {
 
+		// Fly to planet
 		if (Mouse.left_click()) {
 			for (planet in planets) {
-				if (planet != current_planet && mouse_planet_intersect(planet)) {
+				if (planet != current_planet 
+					&& mouse_planet_intersect(planet)
+					&& planet_in_interact(planet)) 
+				{
 
 					if (cargo_weight() > cargo_weight_max) {
 						// If over cargo weight capacity, 
@@ -1294,14 +1347,17 @@ class Main {
 					} else {
 						state = GameState_Flying;
 
-						flying_state_timer = flying_state_timer_max;
-						flying_destruction_time = Random.float(0.3, 0.7);
+						flying_state_timer = 0;
 
 						for (i in 0...star_particle_amount) {
 							star_particles.push(generate_star_particle());
 						}
 						previous_planet = current_planet;
 						current_planet = planet;
+
+						// Set flying time based on distance, this will affect the amount of damage generated
+						var trip_distance = Math.dst(current_planet.x, current_planet.y, previous_planet.x, previous_planet.y);
+						flying_state_timer_max = Math.round(trip_distance * distance_to_time * Random.float(0.75, 1.25) * 60);
 
 						// Move dragged item back
 						if (dragged_item != null) {
@@ -1721,10 +1777,8 @@ class Main {
 				i++;
 			}
 		}
-
-		// trace(ship_inventory);
 		shift_inventory(ship_inventory, InventoryState_ShipInventory);
-		// shift_inventory(current_planet.inventory, InventoryState_PlanetInventory);
+		shift_inventory(current_planet.inventory, InventoryState_PlanetInventory);
 
 
 		// Update mining graphic state
@@ -1759,7 +1813,7 @@ class Main {
 			case GameState_Planets: update_planets();
 		}
 
-		Text.display(0, 0, 'Mouse: x=${Mouse.x} y=${Mouse.y}');
+		Text.display(0, screen_height - 50, 'Mouse: x=${Mouse.x} y=${Mouse.y}');
 
 		// Messages
 		if (message_queue.length != 0) {
@@ -1774,6 +1828,23 @@ class Main {
 				message_timer = 0;
 				message_queue.shift();
 			}
+		}
+
+		var left = Input.pressed(Key.A);
+		var right = Input.pressed(Key.D);
+		var up = Input.pressed(Key.W);
+		var down = Input.pressed(Key.S);
+
+		if (right && !left) {
+			viewport_x += viewport_scroll_speed;
+		} else if (left && !right) {
+			viewport_x -= viewport_scroll_speed;
+		}
+
+		if (down && !up) {
+			viewport_y += viewport_scroll_speed;
+		} else if (up && !down) {
+			viewport_y -= viewport_scroll_speed;
 		}
 	}
 }
