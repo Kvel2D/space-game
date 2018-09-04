@@ -1,40 +1,50 @@
 ---------------------------------------------------------------------------------------------
 TODO
 
+current thoughts:
+	attaching parts is a pain, either make auto attach the default or reduce how often you need to attach parts
+	currently there's a bit too much attaching between flying, also the ship feels like it's not big enough,
+	enlarge the ship canvas 
 
-planet name generator
+ship color selection
+
+figure out cargo size as related to item weights
+
+make higher level planets produce significantly more resources
+and higher level stations cost much more
+
+drones
+	crafted in assembly station, not an actual item
+	proceeds to move between closest planet and assembly station, carrying materials
 
 optimize rendering of parts and ship
 	create image for each part
 	recycle images, when part is attached, push to array and maybe reuse
-
-keep an image for ship
-	add to image when attaching parts
-	draw pixel by pixel during flying
-	remove at the end of flying
-
-no planet inventory without a station
-
-planets have levels, higher level planets produce more resources(can be seen in tooltip, next to remote inventory)
-	3 station levels, planet level must be at least equal to station level to install
-
-figure out cargo size as related to item weights
-
+	keep an image for ship
+		add to image when attaching parts
+		draw pixel by pixel during flying
+		remove at the end of flying
 
 
 ---------------------------------------------------------------------------------------------
-BUGS AND ISSUES
+BUGS
 
-need to reset dragging state when flying, currently there are no error checks
-
-dragging and splitting shouldn't intersect, disable one while doing the other
-
+splitting has bugs, splitting while typing in number is weird
 
 ---------------------------------------------------------------------------------------------
 DONE
 
-planets viewport and culling
-planet position generation
-cull planet interactions for planets behind ui
-flying damage scales based on flying time, happens in bursts
-flying time scales based on distance between planets
+planet name generation
+add checks for ui interaction conflicts
+rename planet type to planet level
+fix bug when installing station from planet inventory
+add "active" flag for items, items in planet inventories off-screen are inactive and can't be accessed
+planet levels, affect how much resources mining stations can mine
+mining station levels, need mining station to be same as planet level to actually mine more
+switch planet levels, 1 = dry planet, 2 = mostly water, 3 = medium
+right click moves part to random ship edit area(connected to ship)
+recenter viewport after flying
+crafting menu slider
+weight for different level stations
+fix mining stations adding materials to all material items in inventory, not just one
+fix part border not turning white when touching ship

@@ -34,6 +34,7 @@ class Part {
 	var item_type = ItemType_Part;
 	var inventory_state = InventoryState_None;
 	var dragged = false;
+	var active = true;
 	var x = 0;
 	var y = 0;
 
@@ -45,15 +46,19 @@ class Part {
 	}
 }
 
+// "active" for items means that they are currently on screen, items in non-current planet inventories are inactive 
+
 @:publicFields
 class Station {
 	var item_type = ItemType_Station;
 	var inventory_state = InventoryState_None;
 	var dragged = false;
+	var active = true;
 	var x = 0;
 	var y = 0;
 
 	var station_type = StationType_None;
+	var level = 0;
 
 	function new() {
 
@@ -65,6 +70,7 @@ class Material {
 	var item_type = ItemType_Material;
 	var inventory_state = InventoryState_None;
 	var dragged = false;
+	var active = true;
 	var x = 0;
 	var y = 0;
 
@@ -95,10 +101,11 @@ class Planet {
 	var x = 0;
 	var y = 0;
 	var name = "";
-	var type = 0;
+	var level = 0;
 	var station = StationType_None;
+	var station_level = 0;
 	var mining_timer = 0;
-	static inline var mining_timer_max = 5 * 60;
+	static var mining_timer_max_list = [0, 5 * 60, 3 * 60, 1 * 60]; // set based on level(first is 0 because levels span 1 to 3)
 
 	var mining_graphic_on = false;
 	var mining_graphic_timer = 0;
@@ -183,23 +190,32 @@ class Main {
 	var ship_inventory = new Vector<Dynamic>(ship_inventory_size);
 
 	static inline var planet_inventory_x = ui_x;
-	static inline var planet_inventory_y = 500;
+	static inline var planet_inventory_y = 400;
 	static inline var planet_inventory_background_width = 250;
 	static inline var planet_inventory_background_height = 100;
 	static inline var planet_inventory_size = 10;
 	static inline var planet_inventory_width = 5;
 
 	var trash_x = ui_x;
-	var trash_y = 650;
+	var trash_y = 550;
 	var trash_background_width = 100;
 	var trash_background_height = 50;
 
-	var crafting_x = ui_x;
-	var crafting_y = 750;
-	var crafting_background_width = 300;
-	var crafting_background_height = 200;
+	static inline var crafting_x = ui_x;
+	static inline var crafting_y = 650;
+	static inline var crafting_background_width = 300;
+	static inline var crafting_background_height = 300;
+	var craft_scroll = 0;
+	static inline var scroll_hide_height = 40;
+	static inline var scroll_area_x = crafting_x + crafting_background_width - 30;
+	static inline var scroll_area_y = crafting_y + scroll_hide_height;
+	static inline var scroll_area_width = 10;
+	static inline var scroll_area_height = crafting_background_height - 2 * scroll_hide_height;
+	static inline var scroll_slider_width = 10;
+	static inline var scroll_slider_height = 40;
+	var scrolling = false;
 
-	static inline var mining_station_cost = 5;
+	static var mining_station_costs = [0, 5, 10, 15];
 	static inline var assembly_station_cost = 10;
 	static inline var part_cost = 1;
 
@@ -214,6 +230,8 @@ class Main {
 	var dragging_y: Float = 0;
 
 	static inline var station_weight: Int = 5;
+	var mining_station_weights = [0, 5, 10, 15];
+	var assembly_station_weights = [0, 5];
 	static inline var part_weight: Int = 1;
 	var ship_size: Int = 0;
 	var cargo_weight_max: Int = 0;
@@ -228,11 +246,14 @@ class Main {
 	static inline var planet_map_size = 50;
 	static inline var planet_map_scale = 2;
 
+
 	function new() {
 		Gfx.resize_screen(screen_width, screen_height, 1);
 		Gfx.load_image("mining");		
 		Gfx.load_image("assembly");		
 		Gfx.load_image("material");	
+
+		Text.change_size(16);
 
 
 		load_string_to_pixels(ship_pixels, 
@@ -257,10 +278,16 @@ class Main {
 			planets.push(planet);
 			planet.x = -100;
 			planet.y = -100;
-			planet.name = 'planet_${planets.length - 1}';
-			planet.type = Random.int(1, 3); // 1 = no water, 2 = some water, 3 = lots of water
+			planet.name = generate_planet_name();
+			planet.level = Random.int(1, 3); // 1 = dry, 2 = lots of water, 3 = medium
+			
+			// Skew levels down a bit
+			if (Random.chance(75)) {
+				planet.level = Std.int(Math.max(1, planet.level - 1));
+			}
+
+			var mining_timers = [2 * 60, 2 * 60, 2 * 60];
 			Gfx.create_image(planet.name, planet_size, planet_size);
-			// generate_planet_image(planet);
 
 			return planet;
 		}
@@ -302,19 +329,21 @@ class Main {
 		stations.push(m_station);
 		items.push(m_station);
 		m_station.station_type = StationType_Mining;
+		m_station.level = 1;
 		add_to_planet_inventory(m_station);
 
 		var a_station = new Station();
 		stations.push(a_station);
 		items.push(a_station);
 		a_station.station_type = StationType_Assembly;
+		a_station.level = 1;
 		add_to_planet_inventory(a_station);
 
-		var material = new Material();
-		materials.push(material);
-		items.push(material);
-		material.amount = 123;
-		add_to_planet_inventory(material);
+		// var material = new Material();
+		// materials.push(material);
+		// items.push(material);
+		// material.amount = 123;
+		// add_to_planet_inventory(material);
 
 
 		update_ship_size_and_cargo_size();
@@ -427,7 +456,7 @@ class Main {
 		var land_color = land_colors[Random.int(0, land_colors.length - 1)];
 		land_colors.push(water_color);
 
-		switch (planet.type) {
+		switch (planet.level) {
 			case 1: {
 				// waterless planets have darker land color instead of water
 				// and water and land in game of life are swapped so that the
@@ -445,12 +474,12 @@ class Main {
 					Math.round(Col.b(land_color) * 0.85));
 			}
 			case 2: {
-				// Medium planets have about earth ratio of land/water
-				initial_chance = Random.float(0.36, 0.4);
-			}
-			case 3: {
 				// mostly water, land is like islands
 				initial_chance = Random.float(0.46, 0.48);
+			}
+			case 3: {
+				// Medium planets have about earth ratio of land/water
+				initial_chance = Random.float(0.36, 0.4);
 			}
 		}
 
@@ -478,6 +507,71 @@ class Main {
 
 
 		planet.image_ready = true;
+	}
+
+	var vowels = ['a', 'e', 'i', 'o', 'u'];
+	var consonants = ['y', 'q', 'w', 'r', 't', 'p', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'z', 'x', 'c', 'v', 'b', 'n', 'm'];
+	var generated_names = [""];
+	function generate_planet_name(): String {
+
+		function random_consonant(): String {
+			return consonants[Random.int(0, consonants.length - 1)];
+		}
+		function random_vowel(): String {
+			return vowels[Random.int(0, vowels.length - 1)];
+		}
+
+		var name = "";
+		while (generated_names.indexOf(name) != -1) {
+			var length = Random.int(2, 4);
+
+			// Decrease number of 4 long names a bit
+			if (Random.chance(50) && length == 4) {
+				length = Random.int(2, 3);
+			}
+			
+			for (i in 0...length) {
+				var consonant_first = Random.bool();
+				var consonant_only = Random.chance(25);
+				var consonant = random_consonant();
+				var vowel = random_vowel();
+
+				if (consonant_only) {
+					// sometimes only add a consonant
+					name += random_consonant();
+					if (Random.chance(10)) {
+						name += consonant;
+					}
+				} if (consonant_first) {
+					name += random_consonant();
+					name += vowel;
+					if (Random.chance(10)) {
+						// sometimes double end vowel
+						name += vowel;
+					}
+				} else {
+					name += vowel;
+					if (Random.chance(10)) {
+						// sometimes double start vowel
+						name += vowel;
+					}
+					name += random_consonant();
+					if (Random.chance(10)) {
+						// sometimes add another consonant
+						name += random_consonant();
+					}
+				}
+
+				// Capitalize first letter
+				if (i == 0) {
+					name = name.charAt(0).toUpperCase() + name.charAt(1);
+				}
+			}
+		}
+
+		generated_names.push(name);
+
+		return name;
 	}
 
 	function generate_part_pixels(part: Part) {
@@ -589,6 +683,7 @@ class Main {
 				} else if (item.station_type == StationType_Assembly) {
 					Gfx.draw_image(item.x, item.y, 'assembly');
 				}
+				Text.display(item.x + 35, item.y + 20, '${item.level}', Col.WHITE);
 			}
 			case ItemType_Material: {
 				Gfx.draw_image(item.x, item.y, 'material');
@@ -612,6 +707,7 @@ class Main {
 		var current_x = random_pixel.x;
 		var current_y = random_pixel.y;	
 
+		// Scale damage with ship size
 		var k = Math.round(ship_size * 0.1 * Random.float(0.75, 1.25));
 		for (i in 0...k) {
 			Random.shuffle(four_dx_dy);
@@ -737,18 +833,20 @@ class Main {
 			}
 		}
 
-		Gfx.fill_box(20, planet_size / 2 - 2, (screen_width - 40), 
+		Gfx.fill_box(planet_size, planet_size / 2 - 2, (screen_width - 40), 
 			4, Col.WHITE);
-		Gfx.fill_box(20, planet_size / 2 - 2, 
+		Gfx.fill_box(planet_size, planet_size / 2 - 2, 
 			(1 - flying_state_timer / flying_state_timer_max) * (screen_width - 40), 
 			4, Col.BLACK);
 
 		if (current_planet != null) {
 			Gfx.draw_image(planet_size / 2, 0, current_planet.name);
+			Text.display(planet_size / 2, planet_size + 10, '${current_planet.name}');
 		}
 		if (previous_planet != null) {
-			Gfx.draw_image(screen_width - planet_size, 0, 
-				previous_planet.name);
+			Gfx.draw_image(screen_width - planet_size, 0, previous_planet.name);
+			Text.display(screen_width - Text.width('${previous_planet.name}'), planet_size + 10, 
+				'${previous_planet.name}');
 		}
 	}
 
@@ -813,6 +911,10 @@ class Main {
 				}
 			}
 			update_ship_size_and_cargo_size();
+
+			// Recenter viewport
+			viewport_x = current_planet.x - 300;
+			viewport_y = current_planet.y - 450;
 		}
 
 		render_flying();
@@ -914,7 +1016,8 @@ class Main {
 						generate_planet_image(planet);
 						generated_planet_this_frame = true;
 					}
-					Gfx.fill_circle(planet.x - viewport_x, planet.y - viewport_y, planet_size / 2, Col.GRAY);
+					Gfx.fill_circle(planet.x - viewport_x + planet_size / 2, planet.y - viewport_y + planet_size / 2, 
+						planet_size / 2, Col.GRAY);
 				} else {
 					Gfx.draw_image(planet.x - viewport_x, planet.y - viewport_y, planet.name);
 				}
@@ -927,23 +1030,23 @@ class Main {
 			if (planet_in_viewport(planet)) {
 				switch (planet.station) {
 					case StationType_None:
-					case StationType_Assembly: Text.display(planet.x, planet.y - 5, 'A', Col.WHITE);
-					case StationType_Mining: Text.display(planet.x, planet.y - 5, 'M', Col.WHITE);
-				}			
+					case StationType_Assembly: {
+						Text.display(planet.x - viewport_x, planet.y - viewport_y - 5, 'A${planet.station_level}', Col.WHITE);
+					}
+					case StationType_Mining: {
+						Text.display(planet.x - viewport_x, planet.y - viewport_y - 5, 'M${planet.station_level}', Col.WHITE);
+					}	
+				}
 			}
 		}
 
 		// Planet mining graphic
 		for (planet in planets) {
 			if (planet.mining_graphic_on && planet_in_viewport(planet)) {
-				if (Math.box_box_intersect(planet.x, planet.y, planet_size, planet_size, 
-					0, 0, viewport_width, viewport_height)) 
-				{
-					var graphic_progress = planet.mining_graphic_timer / Planet.mining_graphic_timer_max;
-					var c = Math.round((1 - graphic_progress) * 255);
-					Text.display(planet.x + planet_size / 2, planet.y - graphic_progress * 10, 
-						'+1', Col.rgb(c, c, c));
-				}
+				var graphic_progress = planet.mining_graphic_timer / Planet.mining_graphic_timer_max;
+				var c = Math.round((1 - graphic_progress) * 255);
+				Text.display(planet.x - viewport_x + planet_size / 2, planet.y - viewport_y - graphic_progress * 10, 
+					'+1', Col.rgb(c, c, c));
 			}
 		}
 
@@ -1071,6 +1174,10 @@ class Main {
 				crafting_background_height, Col.YELLOW);
 			Text.display(crafting_x, crafting_y - 40, 'Crafting');
 
+			var button_x = crafting_x + 10;
+			var button_y: Float = crafting_y + scroll_hide_height - craft_scroll;
+			var text_height = Text.height();
+			var button_height = text_height * 1.25;
 			// Count materials in inventories
 			var material_count = 0;
 			for (i in 0...ship_inventory.length) {
@@ -1085,67 +1192,18 @@ class Main {
 				}
 			}
 
-			function subtract_material(amount: Int) {
-				var amount_left = amount;
-
-				var planet_inventory = current_planet.inventory;
-				for (i in 0...planet_inventory.length) {
-					if (planet_inventory[i] != null 
-						&& planet_inventory[i].item_type == ItemType_Material) 
-					{
-						var material: Material = planet_inventory[i];
-
-						if (amount_left >= material.amount) {
-							// Item completely used up, delete it
-							amount_left -= material.amount;
-							items.remove(material);
-							materials.remove(material);
-							planet_inventory[i] = null;
-						} else {
-							// Item not used up all the way
-							material.amount -= amount_left;
-							amount_left = 0;							
-							break;
-						}
-					}
-				}
-
-				// If planet inventory materials wasn't enough, move on to ship inventory
-				if (amount_left > 0) {
-					for (i in 0...ship_inventory.length) {
-						if (ship_inventory[i] != null 
-							&& ship_inventory[i].item_type == ItemType_Material) 
-						{
-							var material: Material = ship_inventory[i];
-
-							if (amount_left >= material.amount) {
-								// Item completely used up, delete it
-								amount_left -= material.amount;
-								items.remove(material);
-								materials.remove(material);
-								ship_inventory[i] = null;
-							} else {
-								// Item not used up all the way
-								material.amount -= amount_left;
-								amount_left = 0;							
-								break;
-							}
-						}
-					}
-				}
+			function out_of_scroll_bound(y: Float): Bool {
+				return crafting_y >= y || y >= crafting_y + crafting_background_height;
 			}
 
-			var planet_inventory_has_space = inventory_has_space(planet_inventory);
-
 			function test_space(): Bool {
-				if (planet_inventory_has_space) {
+				if (inventory_has_space(current_planet.inventory)) {
 					return true;
 				} else {
 					add_message('No space in Planet Storage for crafting');
 					return false;
 				}
 			}
-
 			function test_cost(cost): Bool {
 				if (material_count >= cost) {
 					return true;
@@ -1155,70 +1213,147 @@ class Main {
 				}
 			}
 
-			GUI.x = crafting_x + 10;
-			GUI.y = crafting_y + 10;
-			GUI.auto_text_button('Craft Mining Station ${mining_station_cost}', function() {
-				if (test_space() && test_cost(mining_station_cost)) {
-					subtract_material(mining_station_cost);
+			function subtract_material(amount: Int) {
+				var amount_left = amount;
 
-					var m_station = new Station();
-					stations.push(m_station);
-					items.push(m_station);
-					m_station.station_type = StationType_Mining;
-					add_to_planet_inventory(m_station);
+				function subtract_material_from_inventory(inventory: Vector<Dynamic>) {
+					for (i in 0...inventory.length) {
+						if (inventory[i] != null 
+							&& inventory[i].item_type == ItemType_Material) 
+						{
+							var material: Material = inventory[i];
+
+							if (amount_left >= material.amount) {
+								// Item completely used up, delete it
+								amount_left -= material.amount;
+								items.remove(material);
+								materials.remove(material);
+								inventory[i] = null;
+							} else {
+								// Item not used up all the way
+								material.amount -= amount_left;
+								amount_left = 0;							
+								break;
+							}
+						}
+					}
 				}
-			});
-			GUI.auto_text_button('Craft Assembly Station ${assembly_station_cost}', function() {
-				if (test_space() && test_cost(assembly_station_cost)) {
-					subtract_material(assembly_station_cost);
 
-					var a_station = new Station();
-					stations.push(a_station);
-					items.push(a_station);
-					a_station.station_type = StationType_Assembly;
-					add_to_planet_inventory(a_station);
+				subtract_material_from_inventory(current_planet.inventory);
+				// If planet inventory materials wasn't enough, move on to ship inventory
+				if (amount_left > 0) {
+					subtract_material_from_inventory(ship_inventory);
 				}
-			});
-			GUI.auto_text_button('Craft Ship Part ${part_cost}', function() {
-				if (test_space() && test_cost(part_cost)) {
-					subtract_material(part_cost);
+			}
 
-					var part = new Part();
-					parts.push(part);
-					items.push(part);
+			function craft_mining_station_button(level: Int) {
+				GUI.text_button(button_x, button_y, 'Craft Mining Station ${level}, cost: ${mining_station_costs[level]}', function() {
+					if (test_space() && test_cost(mining_station_costs[level])) {
+						subtract_material(mining_station_costs[level]);
 
-					generate_part_pixels(part);
-					add_to_planet_inventory(part);
+						var m_station = new Station();
+						m_station.level = level;
+						stations.push(m_station);
+						items.push(m_station);
+						m_station.station_type = StationType_Mining;
+						add_to_planet_inventory(m_station);
+					}
+				});
+			}
+
+			function crafting_buttons(button_n: Int) {
+				switch (button_n) {
+					case 0: {
+						GUI.text_button(button_x, button_y, 'Craft Ship Part ${part_cost}', function() {
+							if (test_space() && test_cost(part_cost)) {
+								subtract_material(part_cost);
+
+								var part = new Part();
+								parts.push(part);
+								items.push(part);
+
+								generate_part_pixels(part);
+								add_to_planet_inventory(part);
+							}
+						});
+					}
+					case 1: {
+						GUI.text_button(button_x, button_y, 'Craft Assembly Station ${assembly_station_cost}', function() {
+							if (test_space() && test_cost(assembly_station_cost)) {
+								subtract_material(assembly_station_cost);
+
+								var a_station = new Station();
+								stations.push(a_station);
+								items.push(a_station);
+								a_station.station_type = StationType_Assembly;
+								add_to_planet_inventory(a_station);
+							}
+						});
+					}
+					case 2: {
+						craft_mining_station_button(1);
+					}
+					case 3: {
+						craft_mining_station_button(2);
+					}
+					case 4: {
+						craft_mining_station_button(3);
+					}
 				}
-			});
+			}
+
+			for (i in 0...5) {
+				if (!out_of_scroll_bound(button_y)) {
+					crafting_buttons(i);
+				}
+				button_y += (button_height + 2);
+			}
+
+
+			// Top and bottom borders to hide scroll culling
+			Gfx.fill_box(crafting_x, crafting_y, crafting_background_width, scroll_hide_height, Col.YELLOW);
+			Gfx.fill_box(crafting_x, crafting_y + crafting_background_height - scroll_hide_height, crafting_background_width, 
+				scroll_hide_height, Col.YELLOW);
+
+			// Slider
+			Gfx.fill_box(scroll_area_x, scroll_area_y, scroll_area_width, 
+				crafting_background_height - 2 * scroll_hide_height, Col.GRAY);
+			Gfx.fill_box(scroll_area_x, scroll_area_y + craft_scroll, scroll_area_width,
+				scroll_slider_height, Col.WHITE);
 		}
 
-		// Remove planet inventory
+
+		// Planet hover tooltip
 		for (planet in planets) {
-			if (planet != current_planet 
-				&& mouse_planet_intersect(planet)
+			if (mouse_planet_intersect(planet)
 				&& planet_in_interact(planet))
 			{
-				var draw_x = planet.x - viewport_x;
-				var draw_y = planet.y - viewport_y + planet_size + 10;
-				Gfx.fill_box(draw_x, draw_y, planet_inventory_background_width, 
-					planet_inventory_background_height, Col.GRAY);
-				var planet_inventory = planet.inventory;
-				var dx = draw_x - planet_inventory_x;
-				var dy = draw_y - planet_inventory_y;
-				for (i in 0...planet_inventory.length) {
-					if (planet_inventory[i] != null) {
-						planet_inventory[i].x += dx;
-						planet_inventory[i].y += dy;
-						draw_item(planet_inventory[i]);
-						planet_inventory[i].x -= dx;
-						planet_inventory[i].y -= dy;
-					}
+				// Planet name
+				Text.display(planet.x - viewport_x + planet_size, planet.y - viewport_y + planet_size - 30, '${planet.name}(${planet.level})');
 
-					// TODO: could optimize this by keeping track of x and y variables
-					var position = position_in_planet_inventory(i);
-					// Border
-					Gfx.draw_box(position.x + dx, position.y + dy, item_width, item_height, Col.ORANGE);
+				// Remote planet inventory
+				if (planet != current_planet) {
+					var draw_x = planet.x - viewport_x;
+					var draw_y = planet.y - viewport_y + planet_size + 10;
+					Gfx.fill_box(draw_x, draw_y, planet_inventory_background_width, 
+						planet_inventory_background_height, Col.GRAY);
+					var planet_inventory = planet.inventory;
+					var dx = draw_x - planet_inventory_x;
+					var dy = draw_y - planet_inventory_y;
+					for (i in 0...planet_inventory.length) {
+						if (planet_inventory[i] != null) {
+							planet_inventory[i].x += dx;
+							planet_inventory[i].y += dy;
+							draw_item(planet_inventory[i]);
+							planet_inventory[i].x -= dx;
+							planet_inventory[i].y -= dy;
+						}
+
+						// TODO: could optimize this by keeping track of x and y variables
+						var position = position_in_planet_inventory(i);
+						// Border
+						Gfx.draw_box(position.x + dx, position.y + dy, item_width, item_height, Col.ORANGE);
+					}
 				}
 			}
 		}
@@ -1304,7 +1439,13 @@ class Main {
 	function item_weight(item: Dynamic): Int {
 		switch (item.item_type) {
 			case ItemType_Material: return item.amount;
-			case ItemType_Station: return station_weight;
+			case ItemType_Station: {
+				switch (item.station_type) {
+					case StationType_Assembly: return assembly_station_weights[item.level];
+					case StationType_Mining: return mining_station_weights[item.level];
+					case StationType_None:
+				}
+			}
 			case ItemType_Part: return part_weight;
 			case ItemType_None:
 		}
@@ -1333,76 +1474,12 @@ class Main {
 
 	function update_planets() {
 
-		// Fly to planet
-		if (Mouse.left_click()) {
-			for (planet in planets) {
-				if (planet != current_planet 
-					&& mouse_planet_intersect(planet)
-					&& planet_in_interact(planet)) 
-				{
-
-					if (cargo_weight() > cargo_weight_max) {
-						// If over cargo weight capacity, 
-						add_message('Can\'t fly, over cargo capacity');
-					} else {
-						state = GameState_Flying;
-
-						flying_state_timer = 0;
-
-						for (i in 0...star_particle_amount) {
-							star_particles.push(generate_star_particle());
-						}
-						previous_planet = current_planet;
-						current_planet = planet;
-
-						// Set flying time based on distance, this will affect the amount of damage generated
-						var trip_distance = Math.dst(current_planet.x, current_planet.y, previous_planet.x, previous_planet.y);
-						flying_state_timer_max = Math.round(trip_distance * distance_to_time * Random.float(0.75, 1.25) * 60);
-
-						// Move dragged item back
-						if (dragged_item != null) {
-							dragged_item.dragged = false;
-							dragged_item = false;
-						}
-
-						// Move unattached parts back into planet inventory
-						var planet_inventory = previous_planet.inventory;
-						for (part in parts) {
-							if (part.inventory_state == InventoryState_ShipEdit) {
-								var moved_successfully = false;
-
-								for (i in 0...planet_inventory.length) {
-									if (planet_inventory[i] == null) {
-										planet_inventory[i] = part;
-										part.inventory_state = InventoryState_PlanetInventory;
-										var position = position_in_planet_inventory(i);
-										part.x = position.x;
-										part.y = position.y;
-
-										moved_successfully = true;
-
-										break;
-									}
-								}
-
-								if (!moved_successfully) {
-									add_message('Destroyed unattached part, not enough space in planet storage');
-								}
-							}
-						}
-					}
-
-					break;
-				}
-			}
-		}
-
 		// Item dragging
-		if (dragged_item == null) {
+		if (dragged_item == null && split_material == null) {
 			// Picking up
 			if (Mouse.left_click()) {
 				for (item in items) {
-					if (mouse_item_intersect(item)) {
+					if (item.active && mouse_item_intersect(item)) {
 						dragged_item = item;
 						dragged_item.dragged = true;
 						dragging_x = Mouse.x - item.x;
@@ -1412,7 +1489,7 @@ class Main {
 					}
 				}
 			}
-		} else if (Mouse.left_released()) {
+		} else if (Mouse.left_released() && dragged_item != null) {
 
 			function remove_from_inventory(item: Dynamic) {
 				// call before modifying inventory state to new one!
@@ -1449,9 +1526,9 @@ class Main {
 				// Only ship parts can be dropped here
 				remove_from_inventory(dragged_item);
 				dragged_item.inventory_state = InventoryState_ShipEdit;
-				dragged_item.intersecting_ship = part_ship_intersect(dragged_item);
 				dragged_item.x = Math.round((Mouse.x - dragging_x) / ship_pixel_size) * ship_pixel_size;
 				dragged_item.y = Math.round((Mouse.y - dragging_y) / ship_pixel_size) * ship_pixel_size;
+				dragged_item.intersecting_ship = part_ship_intersect(dragged_item);
 				
 				dragged_item.dragged = false;
 				dragged_item = null;
@@ -1532,8 +1609,9 @@ class Main {
 					for (i in 0...planet_inventory.length) {
 						if (planet_inventory[i] != null
 							&& planet_inventory[i].item_type == ItemType_Material
-								&& !planet_inventory[i].dragged // don't stack with itself
-								&& mouse_item_intersect(planet_inventory[i])) 
+							&& !planet_inventory[i].dragged // don't stack with itself
+							&& planet_inventory[i].active // don't stack on top of inactive(in other planet's inventories) items
+							&& mouse_item_intersect(planet_inventory[i])) 
 						{
 							stack_target = planet_inventory[i];
 							break;
@@ -1591,18 +1669,18 @@ class Main {
 		}
 
 		// Splitting material stacks
-		if (split_material == null) {
+		if (split_material == null && dragged_item == null) {
 			// Select material to split
 			if (Mouse.right_released()) {
 				for (material in materials) {
-					if (mouse_item_intersect(material)) {
+					if (material.active && mouse_item_intersect(material)) {
 						split_material = material;
 
 						break;
 					}
 				}
 			}
-		} else {
+		} else if (split_material != null) {
 			// Split, only if split amount isn't larger than total amount of material
 			var split_amount_int = Std.int(split_amount);
 
@@ -1646,54 +1724,236 @@ class Main {
 		// Installing stations
 		// overwrite current planet's station type and delete station item
 		if (Mouse.right_released()) {
-			var installed_station_already = false;
+			var installed_station_from_ship_inventory = false;
 
-			for (i in 0...ship_inventory.length) {
-				if (ship_inventory[i] != null 
-					&& ship_inventory[i].item_type == ItemType_Station
-					&& mouse_item_intersect(ship_inventory[i])) 
-				{
-					var station: Station = ship_inventory[i];
-
-					current_planet.station = station.station_type;
-					ship_inventory[i] = null;
-					items.remove(station);
-					stations.remove(station);
-
-					installed_station_already = true;
-
-					break;
-				}
-			}
-
-			if (!installed_station_already) {
-				var planet_inventory = current_planet.inventory;
-				for (i in 0...planet_inventory.length) {
-					if (planet_inventory[i] != null 
-						&& planet_inventory[i].item_type == ItemType_Station
-						&& mouse_item_intersect(planet_inventory[i])) 
+			function try_install_station(inventory: Vector<Dynamic>): Bool {
+				for (i in 0...inventory.length) {
+					if (inventory[i] != null 
+						&& inventory[i].item_type == ItemType_Station
+						&& mouse_item_intersect(inventory[i])) 
 					{
-						var station: Station = ship_inventory[i];
+						var station: Station = inventory[i];
 
 						current_planet.station = station.station_type;
-						ship_inventory[i] = null;
+						current_planet.station_level = station.level;
+						inventory[i] = null;
 						items.remove(station);
 						stations.remove(station);
 
-						installed_station_already = true;
-
-						break;
+						return true;
 					}
-				}			
+				}
+
+				return false;
+			}
+
+			var installed_already = try_install_station(ship_inventory);
+			if (!installed_already) {
+				try_install_station(current_planet.inventory);
+			}
+		}
+
+
+		// Auto-attach part, pick random pixel, go in random direction until reaching empty cell or ship edit area border, 
+		// place part down, using a random part pixel as the "anchor"
+		// NOTE: placement is not smart at all, the only guarantee is that the part will cover a single space that 
+		// is adjacent to the ship
+		if (Mouse.right_click()) {
+			function try_attach_part(inventory: Vector<Dynamic>) {
+				for (i in 0...inventory.length) {
+					if (inventory[i] != null && inventory[i].active && inventory[i].item_type == ItemType_Part
+						&& mouse_item_intersect(inventory[i])) 
+					{
+						var part: Part = inventory[i];
+
+						var pixels = new Array<IntVector2>();
+						for (x in 0...ship_width) {
+							for (y in 0...ship_height) {
+								if (ship_pixels[x][y]) {
+									pixels.push({x: x, y: y});
+								}
+							}
+						}
+
+						// Pick random pixel on ship, move in random direction from it
+						// When out of bounds or at ship border, stop
+						var current_position = pixels[Random.int(0, pixels.length - 1)];
+						var random_direction = four_dx_dy[Random.int(0, four_dx_dy.length - 1)];
+						var went_out_of_bounds = true;
+						current_position.x += random_direction.x;
+						current_position.y += random_direction.y;
+						while (!out_of_bound_ship(current_position.x, current_position.y)) {
+							if (!ship_pixels[current_position.x][current_position.y]) {
+								// Reached ship border
+								went_out_of_bounds = false;
+								break;
+							}
+							current_position.x += random_direction.x;
+							current_position.y += random_direction.y;
+						}
+
+						// Retrace back to inside ship edit area if went out of bounds
+						if (went_out_of_bounds) {
+							current_position.x -= random_direction.x;
+							current_position.y -= random_direction.y;
+						}
+
+						// Put down part at this location with random offset
+						var part_pixels = new Array<IntVector2>();
+						for (x in 0...part_width) {
+							for (y in 0...part_height) {
+								if (part.pixels[x][y]) {
+									part_pixels.push({x: x, y: y});
+								}
+							}
+						}						
+
+						var random_pixel = part_pixels[Random.int(0, part_pixels.length - 1)];
+
+						var new_x = current_position.x - random_pixel.x;
+						var new_y = current_position.y - random_pixel.y;
+
+						part.x = ship_edit_x + new_x * ship_pixel_size;
+						part.y = ship_edit_y + new_y * ship_pixel_size;
+
+						inventory[i] = null;
+						part.inventory_state = InventoryState_ShipEdit;
+
+						part.intersecting_ship = part_ship_intersect(part);
+
+						return true;
+					}
+				}
+
+				return false;
+			}
+
+			var attached_already = try_attach_part(ship_inventory);
+			if (!attached_already) {
+				try_attach_part(current_planet.inventory);
+			}	
+		}
+
+		// Crafting area scroll slider
+		if (!scrolling) {
+			if (Mouse.left_held() && Math.point_box_intersect(Mouse.x, Mouse.y, scroll_area_x, scroll_area_y,
+				scroll_area_width, scroll_area_height)) 
+			{
+				craft_scroll = Mouse.y - scroll_area_y;
+				scrolling = true;
+			}
+		} else {
+			craft_scroll = Mouse.y - scroll_area_y;
+			if (Mouse.left_released()) {
+				scrolling = false;
+			}
+		}
+		if (craft_scroll < 0) {
+			craft_scroll = 0;
+		}
+		// TODO: limit in other direction
+		
+
+		// Fly to another planet
+		if (Mouse.left_click()) {
+			for (planet in planets) {
+				if (planet != current_planet 
+					&& mouse_planet_intersect(planet)
+					&& planet_in_interact(planet)) 
+				{
+
+					if (cargo_weight() > cargo_weight_max) {
+						// If over cargo weight capacity, 
+						add_message('Can\'t fly, over cargo capacity');
+					} else {
+						state = GameState_Flying;
+						flying_state_timer = 0;
+
+						// Reset drag state
+						if (dragged_item != null) {
+							dragged_item.dragged = false;
+							dragged_item = false;
+						}
+
+						// Reset split state
+						if (split_material != null) {
+							split_material = null;
+						}
+
+						// Reset craft scroll
+						craft_scroll = 0;
+						scrolling = false;
+
+						previous_planet = current_planet;
+						current_planet = planet;
+
+						// Move unattached parts into planet inventory
+						var planet_inventory = previous_planet.inventory;
+						for (part in parts) {
+							if (part.inventory_state == InventoryState_ShipEdit) {
+								var moved_successfully = false;
+
+								for (i in 0...planet_inventory.length) {
+									if (planet_inventory[i] == null) {
+										planet_inventory[i] = part;
+										part.inventory_state = InventoryState_PlanetInventory;
+										var position = position_in_planet_inventory(i);
+										part.x = position.x;
+										part.y = position.y;
+
+										moved_successfully = true;
+
+										break;
+									}
+								}
+
+								if (!moved_successfully) {
+									add_message('Destroyed unattached part, not enough space in planet storage');
+								}
+							}
+						}
+
+						// Deactive items in previous planet's inventory
+						var previous_inventory = previous_planet.inventory;
+						for (i in 0...previous_inventory.length) {
+							if (previous_inventory[i] != null) {
+								previous_inventory[i].active = false;
+							}
+						}
+						// Activate items in destination planet's inventory
+						var destination_inventory = current_planet.inventory;
+						for (i in 0...destination_inventory.length) {
+							if (destination_inventory[i] != null) {
+								destination_inventory[i].active = true;
+							}
+						}
+
+						// Create initial stars
+						for (i in 0...star_particle_amount) {
+							star_particles.push(generate_star_particle());
+						}
+
+						// Set flying time based on distance, this will affect the amount of damage generated
+						var trip_distance = Math.dst(current_planet.x, current_planet.y, previous_planet.x, previous_planet.y);
+						flying_state_timer_max = Math.round(trip_distance * distance_to_time * Random.float(0.75, 1.25) * 60);
+
+					}
+
+					break;
+				}
 			}
 		}
 
 		// Planets with mining stations mine materials
 		for (planet in planets) {
 			if (planet.station == StationType_Mining) {
+
 				planet.mining_timer++;
-				
-				if (planet.mining_timer > Planet.mining_timer_max) {
+
+				// Effective mining level of planet
+				var mining_level = Std.int(Math.min(planet.level, planet.station_level));
+
+				if (planet.mining_timer > Planet.mining_timer_max_list[mining_level]) {
 					planet.mining_timer = 0;
 
 
@@ -1704,6 +1964,8 @@ class Main {
 						{
 							planet.inventory[i].amount += 1;
 							added_material = true;
+
+							break;
 						}
 					}
 
@@ -1715,6 +1977,11 @@ class Main {
 								materials.push(material);
 								items.push(material);
 								material.amount = 1;
+
+								// Materials added to off-screen inventories are inactive
+								if (planet != current_planet) {
+									material.active = false;
+								}
 
 								planet.inventory[i] = material;
 								material.inventory_state = InventoryState_PlanetInventory;
@@ -1845,6 +2112,15 @@ class Main {
 			viewport_y += viewport_scroll_speed;
 		} else if (up && !down) {
 			viewport_y -= viewport_scroll_speed;
+		}
+
+		if (Input.pressed(Key.DOWN)) {
+			craft_scroll += 2;
+		} else if (Input.pressed(Key.UP)) {
+			craft_scroll -= 2;
+			if (craft_scroll < 0) {
+				craft_scroll = 0;
+			}
 		}
 	}
 }
